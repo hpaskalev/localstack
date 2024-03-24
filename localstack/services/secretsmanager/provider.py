@@ -41,6 +41,8 @@ from localstack.aws.api.secretsmanager import (
     GetResourcePolicyResponse,
     GetSecretValueRequest,
     GetSecretValueResponse,
+    BatchGetSecretValueRequest,
+    BatchGetSecretValueResponse,
     InvalidParameterException,
     InvalidRequestException,
     ListSecretVersionIdsRequest,
@@ -117,6 +119,9 @@ class SecretsmanagerProvider(SecretsmanagerApi):
     def get_moto_backend_for_resource(
         name_or_arn: str, context: RequestContext
     ) -> SecretsManagerBackend:
+        if not name_or_arn:
+            return secretsmanager_backends[context.account_id][context.region]
+
         try:
             arn_data = arns.parse_arn(name_or_arn)
             backend = secretsmanager_backends[arn_data["account"]][arn_data["region"]]
@@ -256,6 +261,24 @@ class SecretsmanagerProvider(SecretsmanagerApi):
                 f"Secrets Manager can't find the specified secret value for staging label: {version_stage}"
             )
         return GetSecretValueResponse(**response)
+
+    @handler("BatchGetSecretValue", expand=False)
+    def batch_get_secret_value(
+        self, context: RequestContext, request: BatchGetSecretValueRequest
+    ) -> BatchGetSecretValueResponse:
+        secret_id_list = request.get("SecretIdList")
+        filters = request.get("Filters")
+        next_token= request.get("NextToken")
+        max_results = request.get("MaxResults")
+
+        backend = SecretsmanagerProvider.get_moto_backend_for_resource(None, context)
+        try:
+            secret_page, errors, new_next_token = backend.batch_get_secret_value(secret_id_list, filters, max_results, next_token)
+            return BatchGetSecretValueResponse(SecretValues=secret_page, Errors=errors, NextToken=new_next_token)
+        except InvalidParameterException:
+            raise InvalidParameterException(
+                "You can't use the 'Filters' parameter with the 'MaxResults' parameter."
+            )
 
     @handler("ListSecretVersionIds", expand=False)
     def list_secret_version_ids(
